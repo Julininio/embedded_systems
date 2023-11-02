@@ -10,7 +10,9 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
-#define MAX_CARS 100
+
+#define MAX_CARS		100
+#define PARK_MAX_CAP	200
 
 #define F_CPU 8000000UL
 #define BAUD_RATE 9600
@@ -29,9 +31,10 @@
 // #define PARK_CAPACITY_ADDRESS 8
 // #define WATER_BOTTLES_ADDRESS 12
 // Define EEPROM addresses for storing data
-uint16_t EEPROM_ADDRESS_NUMBER_PLATE = 0;
-uint16_t EEPROM_ADDRESS_CHILD_COUNT = 10;
-uint16_t EEPROM_ADDRESS_ADULT_COUNT = 20;
+uint16_t EEPROM_ADDRESS_NUMBER_PLATE	= 0;
+uint16_t EEPROM_ADDRESS_CHILD_COUNT		= 10;
+uint16_t EEPROM_ADDRESS_ADULT_COUNT		= 20;
+uint16_t EEPROM_ADDRESS_MAX_COUNT		= 30;
 
 void latch();
 char number_plate[9];
@@ -225,9 +228,19 @@ void displayMenu() {
 
 }
 
+bool isParkFull(){
+	totalTourists = eeprom_read_word((uint16_t*)EEPROM_ADDRESS_MAX_COUNT);
+	if (totalTourists > PARK_MAX_CAP) return true;
+	return false;
+}
+
 void handleMenuChoice(int choice) {
 	switch (choice) {
-		case '1':
+		case '1':		
+		if(isParkFull()){
+			lcd_print_fridge("park full");
+		}
+		
 		USART_Transmit("Number plate: ");
 		USART_ReceiveString(number_plate, sizeof(number_plate));
 		USART_Transmit(" You entered: ");
@@ -249,8 +262,16 @@ void handleMenuChoice(int choice) {
 		eeprom_write_block(number_plate, (void*)EEPROM_ADDRESS_NUMBER_PLATE, sizeof(number_plate));
 		eeprom_write_word((uint16_t*)EEPROM_ADDRESS_CHILD_COUNT, childCount);
 		eeprom_write_word((uint16_t*)EEPROM_ADDRESS_ADULT_COUNT, adultCount);
+		eeprom_write_word((uint16_t*)EEPROM_ADDRESS_MAX_COUNT, (adultCount+childCount));
 
 		USART_Transmit("Tourists registered successfully. Data stored in EEPROM.\r\n");
+		
+		lcd_print_gate("Car passing.");
+		_delay_ms(2*1000);
+		lcd_print_gate("Gate closing");
+		_delay_ms(3*1000);
+		lcd_print_gate("Queen Elizabeth N.P.");
+		
 		break;
 		case '2':
 		// Read values from EEPROM
