@@ -599,7 +599,6 @@ int main(void)
 	lcd_init_fridge();
 	
 	USART_Init(); // bring back
-	
 	// Write car data to EEPROM
 	//writeCarToEEPROM(&carToWrite);
 	
@@ -613,7 +612,6 @@ int main(void)
 	// setup interrupts
 	sei();
 	EIMSK |= (1<<INT0);
-	
 	MCUCR |= (1<<ISC01);
 	
 	// set data direction registers
@@ -623,20 +621,15 @@ int main(void)
 	// Set pull up resistor on incoming car switch
 	PORTD |= (1<<PD0);
 	
-	while(1){}
+	while(1){
+		displayMenu();
+	}
 }
 
 
 ISR(INT0_vect) {
- 	//while(1){
- 		//if (!(PINB & (1 << PB7))) {
- 		// Set the buzzer on
- 		PORTB |= (1<<PB7);
- 		_delay_ms(500);
- 		PORTB &= ~(1<<PB7);
-		 lcd_print_gate("Incoming tourist vehicle");
-		 //lcd_print_fridge("fridge");
- 		//_delay_ms(500);
- 		//}
- 	//}
+ 	PORTB |= (1<<PB7);
+ 	_delay_ms(500);
+ 	PORTB &= ~(1<<PB7);
+	lcd_print_gate("Car at gate.");
 }
