@@ -10,6 +10,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
 #define MAX_CARS		100
 #define PARK_MAX_CAP	200
@@ -31,13 +32,15 @@
 // #define PARK_CAPACITY_ADDRESS 8
 // #define WATER_BOTTLES_ADDRESS 12
 // Define EEPROM addresses for storing data
-uint16_t EEPROM_ADDRESS_NUMBER_PLATE	= 0;
-uint16_t EEPROM_ADDRESS_CHILD_COUNT		= 10;
-uint16_t EEPROM_ADDRESS_ADULT_COUNT		= 20;
-uint16_t EEPROM_ADDRESS_MAX_COUNT		= 30;
+uint16_t EEPROM_ADDRESS_NUMBER_PLATE		= 00;
+uint16_t EEPROM_ADDRESS_CHILD_COUNT			= 10;
+uint16_t EEPROM_ADDRESS_ADULT_COUNT			= 20;
+uint16_t EEPROM_ADDRESS_MAX_COUNT			= 30;
+uint16_t EEPROM_ADDRESS_NUMBER_PLATES		= 40;
+
 
 void latch();
-char number_plate[9];
+char number_plate[10];
 int childCount = 0;
 int adultCount = 0;
 int carCount = 0;
@@ -51,29 +54,13 @@ int currentparkCapacity;
 int waterMoney = 0;
 int totalTourists = 0;
 int feeCollected;
+int countNumberPlates = 0;
 bool loggedIn = false;
-
-
- 	//eeprom_write_float((float*)0, childFee);
-// 	eeprom_write_float((float*)4, adultFee);
-// 	eeprom_write_float((float*)8, parkCapacity);
-// 	eeprom_write_float((float*)12, waterBottles);
-// 	
-
-
 
  	//eeprom_read_block((void*)&childFee, (const void*)0, sizeof(childFee));
 // 	eeprom_read_block((void*)&adultFee, (const void*)4, sizeof(adultFee));
 // 	eeprom_read_block((void*)&parkCapacity, (const void*)8, sizeof(parkCapacity));
 // 	eeprom_read_block((void*)&waterBottles, (const void*)12, sizeof(waterBottles));
-// 
-// 	printf("Park Capacity: %.2f\n", parkCapacity);
-// 	printf("Fridge Bottles: %.2f\n", waterBottles);
-// 	printf("Adult Fee: %.2f\n", adultFee);
-// 	printf("Child Fee: %.2f\n", childFee);
-// 	printf("Configuration values loaded from EEPROM.\n");
-// }
-
 
 void USART_Init() {
 	// Set baud rate
@@ -234,83 +221,131 @@ bool isParkFull(){
 	return false;
 }
 
+void saveNumberPlate(char numberPlate[10]){
+	if (countNumberPlates >= 1){
+		eeprom_write_block(numberPlate, (void*)EEPROM_ADDRESS_NUMBER_PLATES, sizeof(numberPlate));
+		countNumberPlates += 1;
+		EEPROM_ADDRESS_NUMBER_PLATES += sizeof(numberPlate);	// 40, 50, 60, 70
+		return;
+	}
+	
+	eeprom_write_block(numberPlate, (void*)EEPROM_ADDRESS_NUMBER_PLATES, sizeof(numberPlate));
+	countNumberPlates += 1;
+	EEPROM_ADDRESS_NUMBER_PLATES += sizeof(numberPlate);
+}
+	
+
+void displayCarsInsidePark(){
+	USART_Transmit(" Number of cars: ");
+	USART_TransmitInt(countNumberPlates);
+	USART_Transmit("\r\n");
+	int count = 1;
+	char numberPlate[10];
+	uint16_t maxAddress = EEPROM_ADDRESS_NUMBER_PLATES - sizeof(numberPlate) ;
+	
+	for (uint16_t i = (EEPROM_ADDRESS_NUMBER_PLATES - (countNumberPlates*sizeof(numberPlate))); i <= maxAddress; i+=sizeof(numberPlate))
+	{
+		eeprom_read_block(numberPlate, (void*)i, sizeof(numberPlate));
+		// USART_TransmitInt(i);
+		USART_TransmitInt(count);
+		USART_Transmit(": ");
+		for (int x =0; x < 10; x++)
+		{
+			USART_Transmit(numberPlate[i]);
+		}
+		//USART_Transmit(numberPlate);
+		USART_Transmit("\r\n");
+		count++;
+	}
+}
+
+void displayMoneyCollected(){
+}
+
+void resetControllerEEPROM(){
+	uint16_t eepromAddress = 0;
+	uint8_t clearValue = 0xFF;
+
+	for (eepromAddress = 0; eepromAddress < E2END; eepromAddress++) {
+		eeprom_write_byte((uint8_t*)eepromAddress, clearValue);
+	}
+}
+
 void handleMenuChoice(int choice) {
 	switch (choice) {
 		case '1':		
-		if(isParkFull()){
-			lcd_print_fridge("park full");
-		}
+			if(isParkFull()){
+				lcd_print_gate("park full");
+				return;
+			}
 		
-		USART_Transmit("Number plate: ");
-		USART_ReceiveString(number_plate, sizeof(number_plate));
-		USART_Transmit(" You entered: ");
-		USART_Transmit(number_plate);
-		USART_Transmit("\r\n");
+			USART_Transmit("Number plate: ");
+			USART_ReceiveString(number_plate, sizeof(number_plate));
+			USART_Transmit(" You entered: ");
+			USART_Transmit(number_plate);
+			USART_Transmit("\r\n");
 
-		USART_Transmit("Below 10yrs: ");
-		childCount = USART_ReadInteger();
-		USART_Transmit(" You entered: ");
-		USART_TransmitInt(childCount);
-		USART_Transmit("\r\n");
+			USART_Transmit("Below 10yrs: ");
+			childCount = USART_ReadInteger();
+			USART_Transmit(" You entered: ");
+			USART_TransmitInt(childCount);
+			USART_Transmit("\r\n");
 
-		USART_Transmit("Above 10yrs: ");
-		adultCount = USART_ReadInteger();
-		USART_Transmit(" You entered: ");
-		USART_TransmitInt(adultCount);
-		USART_Transmit("\r\n");
-		// Store values in EEPROM
-		eeprom_write_block(number_plate, (void*)EEPROM_ADDRESS_NUMBER_PLATE, sizeof(number_plate));
-		eeprom_write_word((uint16_t*)EEPROM_ADDRESS_CHILD_COUNT, childCount);
-		eeprom_write_word((uint16_t*)EEPROM_ADDRESS_ADULT_COUNT, adultCount);
-		eeprom_write_word((uint16_t*)EEPROM_ADDRESS_MAX_COUNT, (adultCount+childCount));
+			USART_Transmit("Above 10yrs: ");
+			adultCount = USART_ReadInteger();
+			USART_Transmit(" You entered: ");
+			USART_TransmitInt(adultCount);
+			USART_Transmit("\r\n");
+			// Store values in EEPROM
+			saveNumberPlate(number_plate);
+			eeprom_write_word((uint16_t*)EEPROM_ADDRESS_CHILD_COUNT, childCount);
+			eeprom_write_word((uint16_t*)EEPROM_ADDRESS_ADULT_COUNT, adultCount);
+			eeprom_write_word((uint16_t*)EEPROM_ADDRESS_MAX_COUNT, (adultCount+childCount));
 
-		USART_Transmit("Tourists registered successfully. Data stored in EEPROM.\r\n");
+			USART_Transmit("Tourists registered successfully. Data stored in EEPROM.\r\n");
 		
-		lcd_print_gate("Car passing.");
-		_delay_ms(2*1000);
-		lcd_print_gate("Gate closing");
-		_delay_ms(3*1000);
-		lcd_print_gate("Queen Elizabeth N.P.");
+			lcd_print_gate("Car passing.");
+			_delay_ms(2*1000);
+			lcd_print_gate("Gate closing");
+			_delay_ms(3*1000);
+			lcd_print_gate("Queen Elizabeth N.P.");
 		
-		break;
+			break;
 		case '2':
-		// Read values from EEPROM
-		eeprom_read_block(number_plate, (void*)EEPROM_ADDRESS_NUMBER_PLATE, sizeof(number_plate));
-		childCount = eeprom_read_word((uint16_t*)EEPROM_ADDRESS_CHILD_COUNT);
-		adultCount = eeprom_read_word((uint16_t*)EEPROM_ADDRESS_ADULT_COUNT);
+			childCount = eeprom_read_word((uint16_t*)EEPROM_ADDRESS_CHILD_COUNT);
+			adultCount = eeprom_read_word((uint16_t*)EEPROM_ADDRESS_ADULT_COUNT);
 
-		USART_Transmit("Tourists in the park:\r\n");
-		USART_Transmit("Number plate: ");
-		USART_Transmit(number_plate);
-		USART_Transmit("\r\n");
+			USART_Transmit("Tourists in the park:\r\n");
+// 			USART_Transmit("Number plate: ");
+// 			USART_Transmit(number_plate);
+// 			USART_Transmit("\r\n");
 
-		USART_Transmit("Below 10yrs: ");
-		USART_TransmitInt(childCount);
-		USART_Transmit("\r\n");
+			USART_Transmit("Below 10yrs: ");
+			USART_TransmitInt(childCount);
+			USART_Transmit("\r\n");
 
-		USART_Transmit("Above 10yrs: ");
-		USART_TransmitInt(adultCount);
-		USART_Transmit("\r\n");
-		break;
+			USART_Transmit("Above 10yrs: ");
+			USART_TransmitInt(adultCount);
+			USART_Transmit("\r\n");
+			break;
 		case '3':
-		printf("Cars in the park:\n");
-		//displayCarsInsidePark();
-		break;
+			displayCarsInsidePark();
+			break;
 		case '4':
-		// Implement displaying money collected
-		break;
+			displayMoneyCollected();
+			break;
 		case '5':
-		printf("Number of drivers in the park: %d\n", carCount);
-		break;
+			printf("Number of drivers in the park: %d\n", carCount);
+			break;
 		case '6':
-		printf("Number of bottles in the fridge: %.2f\n", waterBottles);
-		break;
+			printf("Number of bottles in the fridge: %.2f\n", waterBottles);
+			break;
 		case '7':
-		//replenishFridge();
-		break;
+			//replenishFridge();
+			break;
 		case '8':
-		//IsParkFull();
-		break;
+			//IsParkFull();
+			break;
 		case '9':
 		loggedIn = false;
 		USART_Transmit("Logged out.\r\n");
@@ -616,19 +651,11 @@ int main(void)
 	DDRF = 0xff; // gate LCD
 	DDRA = 0xff; // gate LCD
 	
-	lcd_init_gate(); // bring back
+	lcd_init_gate();
 	lcd_init_fridge();
 	
 	USART_Init(); // bring back
-	// Write car data to EEPROM
-	//writeCarToEEPROM(&carToWrite);
 	
-	// Read car data from EEPROM
-	//readCarFromEEPROM(&carRead);
-	// displayMenu(); // bring back, making my buzzer not to work
-	
-	// 	registration();
-	// MoneySlot(); // bring back, making my buzzer not to work
 	
 	// setup interrupts
 	sei();
@@ -641,6 +668,8 @@ int main(void)
 	
 	// Set pull up resistor on incoming car switch
 	PORTD |= (1<<PD0);
+	
+	//resetControllerEEPROM();
 	
 	while(1){
 		displayMenu();
