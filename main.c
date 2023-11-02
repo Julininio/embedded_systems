@@ -12,14 +12,16 @@
 #include <stdbool.h>
 #define MAX_CARS 100
 
-#define F_CPU 8000000UL  // Define your microcontroller clock frequency
-#define BAUD_RATE 9600     // Define your desired baud rate
+#define F_CPU 8000000UL
+#define BAUD_RATE 9600
 #define BAUD_PRESCALE ((F_CPU / (16UL * BAUD_RATE)) - 1)
 
-
-#define rs PG1
-#define rw PG2
-#define enable PG3
+#define rs_fridge PG1
+#define rw_fridge PG2
+#define enable_fridge PG3
+#define rs_gate PA1
+#define rw_gate PA2
+#define enable_gate PA3
 #define dataline PORTH
 
 // #define CHILD_FEE_ADDRESS 0
@@ -49,7 +51,6 @@ int feeCollected;
 bool loggedIn = false;
 
 
-
  	//eeprom_write_float((float*)0, childFee);
 // 	eeprom_write_float((float*)4, adultFee);
 // 	eeprom_write_float((float*)8, parkCapacity);
@@ -69,7 +70,6 @@ bool loggedIn = false;
 // 	printf("Child Fee: %.2f\n", childFee);
 // 	printf("Configuration values loaded from EEPROM.\n");
 // }
-
 
 
 void USART_Init() {
@@ -103,6 +103,7 @@ void USART_Transmitchar(unsigned char data) {
 	// Put data into buffer, sends the data
 	UDR0 = data;
 }
+
 unsigned char USART_Receive() {
 	// Wait for data to be received
 	while (!(UCSR0A & (1 << RXC0)));
@@ -117,8 +118,6 @@ void USART_TransmitInt(int num) {
 	USART_Transmit(buffer);  // Transmit the string
 }
 
-
-// Function to transmit a string over USART
 void USART_TransmitString(const char* str) {
 	while (*str != '\0') {
 		USART_Transmitchar(*str);
@@ -126,9 +125,6 @@ void USART_TransmitString(const char* str) {
 	}
 }
 
-
-
-// Function to convert an integer to a string
 void intToString(int number, char* buffer) {
 	sprintf(buffer, "%d", number);
 }
@@ -229,8 +225,6 @@ void displayMenu() {
 
 }
 
-
-
 void handleMenuChoice(int choice) {
 	switch (choice) {
 		case '1':
@@ -305,6 +299,7 @@ void handleMenuChoice(int choice) {
 	}
 }
 
+
 // void replenishFridge() {
 // 	char inputPassword[10];
 // 	printf("Enter the password: ");
@@ -337,45 +332,77 @@ void handleMenuChoice(int choice) {
 // 	return (childCount + adultCount + carCount) >= parkCapacity;
 // }
 
-
 void defaultMessage() {
 	// msg in case of any exit
 }
 
-
-
-void latch(){
-	PORTG |= (1 << enable);
+void latch_lcd_fridge(){
+	PORTG |= (1 << enable_fridge);
 	_delay_ms(1);
-	PORTG &= ~(1 << enable);
+	PORTG &= ~(1 << enable_fridge);
 	_delay_ms(1);
 }
 
+void latch_lcd_gate(){
+	PORTA |= (1 << enable_gate);
+	_delay_ms(1);
+	PORTA &= ~(1 << enable_gate);
+	_delay_ms(1);
+}
 
-void lcd_data( unsigned char data ) {
+void lcd_data_fridge( unsigned char data ) {
 	PORTH = data;
-	PORTG |= (1<<rs);  // Data mode   rs= 1
-	PORTG &= ~(1 << rw);  // WRITE
-	latch();
+	PORTG |= (1<<rs_fridge);  // Data mode   rs= 1
+	PORTG &= ~(1 << rw_fridge);  // WRITE
+	latch_lcd_fridge();
 }
 
-void lcd_command( unsigned char command ) {
+void lcd_data_gate( unsigned char data ) {
+	PORTF = data;
+	PORTA |= (1<<rs_gate);  // Data mode   rs= 1
+	PORTA &= ~(1 << rw_gate);  // WRITE
+	latch_lcd_gate();
+}
+
+void lcd_command_fridge( unsigned char command ) {
 	PORTH = command;
-	PORTG &= ~(1 << rs);  // COMMAND MODE
-	PORTG &= ~(1 << rw);  // WRITE
-	latch();
+	PORTG &= ~(1 << rs_fridge);  // COMMAND MODE
+	PORTG &= ~(1 << rw_fridge);  // WRITE
+	latch_lcd_fridge();
 }
 
-void lcd_init() {
-	lcd_command(0x0f);
-	lcd_command(0x3f);
-	lcd_command(0x01);
+void lcd_command_gate( unsigned char command ) {
+	PORTF = command;
+	PORTA &= ~(1 << rs_gate);  // COMMAND MODE
+	PORTA &= ~(1 << rw_gate);  // WRITE
+	latch_lcd_gate();
 }
 
-void lcd_print(char content[]) {
+void lcd_init_fridge() {
+	lcd_command_fridge(0x0f);
+	lcd_command_fridge(0x3f);
+	lcd_command_fridge(0x01);
+}
+
+void lcd_init_gate() {
+	lcd_command_gate(0x0f);
+	lcd_command_gate(0x3f);
+	lcd_command_gate(0x01);
+}
+
+void lcd_print_fridge(char* content) {
+	lcd_command_fridge(0x01);
 	int len = strlen(content);
 	for(int i=0; i<len; i++) {
-		lcd_data(content[i]);
+		lcd_data_fridge(content[i]);
+	}
+}
+
+void lcd_print_gate(char* content) {
+	lcd_command_gate(0x01);
+	int len = strlen(content);
+	for(int i=0; i<len; i++) {
+		lcd_data_gate(content[i]);
 	}
 }
 
@@ -445,7 +472,6 @@ int register_keypad() {
 	return key;
 }
 
-
 void registration() {
 	lcd_command(0x01);
 	lcd_command(0x80);
@@ -491,7 +517,6 @@ void registration() {
 	lcd_print("Gate closing.");
 	_delay_ms(2000);
 }
-
 
 void MoneySlot() {
 	lcd_command(0x01);
@@ -561,42 +586,57 @@ void MoneySlot() {
 	
 }
 
-
 int main(void)
 {
-	DDRB = 0x02;
 	DDRL = 0x87;
-	DDRH = 0xff;
-	DDRG = 0xff;
+	DDRH = 0xff; //fridge LCD
+	DDRG = 0xff; // fridge LCD
 	DDRK = 0xff;
+	DDRF = 0xff; // gate LCD
+	DDRA = 0xff; // gate LCD
 	
+	lcd_init_gate(); // bring back
+	lcd_init_fridge();
 	
-	lcd_init();
-	USART_Init();
-
+	USART_Init(); // bring back
+	
 	// Write car data to EEPROM
 	//writeCarToEEPROM(&carToWrite);
-
+	
 	// Read car data from EEPROM
 	//readCarFromEEPROM(&carRead);
-	displayMenu();
+	// displayMenu(); // bring back, making my buzzer not to work
 	
-// 	registration();
-	MoneySlot();
+	// 	registration();
+	// MoneySlot(); // bring back, making my buzzer not to work
 	
+	// setup interrupts
 	sei();
-	EIMSK |= (1 << INT0);
-	EICRA |= (1 << ISC01);
+	EIMSK |= (1<<INT0);
 	
+	MCUCR |= (1<<ISC01);
 	
+	// set data direction registers
+	DDRD = 0x00;
+	DDRB = 0xFF;
 	
+	// Set pull up resistor on incoming car switch
+	PORTD |= (1<<PD0);
+	
+	while(1){}
 }
 
+
 ISR(INT0_vect) {
-	if (!(PINB & (1<<0))) {
-		PORTB |= (1<<1);
-		_delay_ms(500);
-		PORTB &= ~(1<<1);
-		_delay_ms(500);
-	}
+ 	//while(1){
+ 		//if (!(PINB & (1 << PB7))) {
+ 		// Set the buzzer on
+ 		PORTB |= (1<<PB7);
+ 		_delay_ms(500);
+ 		PORTB &= ~(1<<PB7);
+		 lcd_print_gate("Incoming tourist vehicle");
+		 //lcd_print_fridge("fridge");
+ 		//_delay_ms(500);
+ 		//}
+ 	//}
 }
