@@ -12,8 +12,11 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
-#define MAX_CARS		100
-#define PARK_MAX_CAP	200
+#define MAX_CARS			100
+#define PARK_MAX_CAP		200
+#define PRICE_BELOW_10		5000
+#define PRICE_ABOVE_10		10000
+#define CAR_INFO_SIZE		15
 
 #define F_CPU 8000000UL
 #define BAUD_RATE 9600
@@ -36,8 +39,8 @@ uint16_t EEPROM_ADDRESS_NUMBER_PLATE		= 00;
 uint16_t EEPROM_ADDRESS_CHILD_COUNT			= 10;
 uint16_t EEPROM_ADDRESS_ADULT_COUNT			= 20;
 uint16_t EEPROM_ADDRESS_MAX_COUNT			= 30;
-uint16_t EEPROM_ADDRESS_NUMBER_PLATES		= 40;
-
+uint16_t EEPROM_ADDRESS_TOTAL_COUNT			= 40;
+uint16_t EEPROM_ADDRESS_NUMBER_PLATES		= 50;
 
 void latch();
 char number_plate[10];
@@ -56,11 +59,31 @@ int totalTourists = 0;
 int feeCollected;
 int countNumberPlates = 0;
 bool loggedIn = false;
+bool resetEEPROM = true;
 
- 	//eeprom_read_block((void*)&childFee, (const void*)0, sizeof(childFee));
-// 	eeprom_read_block((void*)&adultFee, (const void*)4, sizeof(adultFee));
-// 	eeprom_read_block((void*)&parkCapacity, (const void*)8, sizeof(parkCapacity));
-// 	eeprom_read_block((void*)&waterBottles, (const void*)12, sizeof(waterBottles));
+int getChildCount(){ return eeprom_read_word((uint16_t*)EEPROM_ADDRESS_CHILD_COUNT); }
+int getAdultCount(){ return eeprom_read_word((uint16_t*)EEPROM_ADDRESS_ADULT_COUNT); }
+int getTotalCount(){ return eeprom_read_word((uint16_t*)EEPROM_ADDRESS_TOTAL_COUNT); }
+
+char* removeTrailingNulls(char* str) {
+	int length = strlen(str);
+
+	for (int i = length - 1; i >= 0; i--) {
+		if (str[i] == '\0') {
+			str[i] = '\0';
+			} else {
+			break;
+		}
+	}
+
+	return str;
+}
+
+void initialiseEEPROM(){
+	updateChildrenInParkCount(0);
+	updateAdultsInParkCount(0);
+	updateTotalPeopleInParkCount(0);
+}
 
 void USART_Init() {
 	// Set baud rate
@@ -204,12 +227,13 @@ void displayMenu() {
 		USART_Transmit("6. Number of bottles in the fridge.\r\n");
 		USART_Transmit("7. Replenish fridge.\r\n");
 		USART_Transmit("8. Check if park is full.\r\n");
-		USART_Transmit("9. Logout.\r\n");
+		USART_Transmit("9. Car exiting park.\r\n");
+		USART_Transmit("10. Logout.\r\n");
 		USART_Transmit("Enter an option.\r\n");
 		choice = getOption();
 		
 		handleMenuChoice(choice);
-	} while (choice != '9');
+	} while (choice != '10');
 		
 		USART_Transmit("Logged out.\r\n");
 
@@ -221,54 +245,75 @@ bool isParkFull(){
 	return false;
 }
 
-void saveNumberPlate(char numberPlate[10]){
+void saveCarInfo(char numberPlate[CAR_INFO_SIZE]){
 	if (countNumberPlates >= 1){
-		eeprom_write_block(numberPlate, (void*)EEPROM_ADDRESS_NUMBER_PLATES, sizeof(numberPlate));
+		eeprom_write_block(numberPlate, (void*)EEPROM_ADDRESS_NUMBER_PLATES, CAR_INFO_SIZE);
 		countNumberPlates += 1;
-		EEPROM_ADDRESS_NUMBER_PLATES += sizeof(numberPlate);	// 40, 50, 60, 70
+		EEPROM_ADDRESS_NUMBER_PLATES += CAR_INFO_SIZE;		
 		return;
 	}
 	
-	eeprom_write_block(numberPlate, (void*)EEPROM_ADDRESS_NUMBER_PLATES, sizeof(numberPlate));
+	eeprom_write_block(numberPlate, (void*)EEPROM_ADDRESS_NUMBER_PLATES, CAR_INFO_SIZE);
 	countNumberPlates += 1;
-	EEPROM_ADDRESS_NUMBER_PLATES += sizeof(numberPlate);
+	EEPROM_ADDRESS_NUMBER_PLATES += CAR_INFO_SIZE;
+}
+
+uint16_t getMaxAddress(){
+	uint16_t maxAddress = EEPROM_ADDRESS_NUMBER_PLATES;
+	if (EEPROM_ADDRESS_NUMBER_PLATES > 40) maxAddress = EEPROM_ADDRESS_NUMBER_PLATES - CAR_INFO_SIZE ;
+	
+	return maxAddress;
 }
 	
-
 void displayCarsInsidePark(){
-	USART_Transmit(" Number of cars: ");
+	USART_Transmit("Number of cars: ");
 	USART_TransmitInt(countNumberPlates);
 	USART_Transmit("\r\n");
-	int count = 1;
-	char numberPlate[10];
-	uint16_t maxAddress = EEPROM_ADDRESS_NUMBER_PLATES - sizeof(numberPlate) ;
 	
-	for (uint16_t i = (EEPROM_ADDRESS_NUMBER_PLATES - (countNumberPlates*sizeof(numberPlate))); i <= maxAddress; i+=sizeof(numberPlate))
+	USART_Transmit("Number plate - Children - Adults");
+	USART_Transmit("\r\n");
+	
+	int count = 1;
+	char carInfo[15];
+	uint16_t maxAddress = getMaxAddress();
+	
+	for (uint16_t i = (EEPROM_ADDRESS_NUMBER_PLATES - (countNumberPlates*CAR_INFO_SIZE)); i <= maxAddress; i+=CAR_INFO_SIZE)
 	{
-		eeprom_read_block(numberPlate, (void*)i, sizeof(numberPlate));
-		// USART_TransmitInt(i);
+		eeprom_read_block(carInfo, (void*)i, CAR_INFO_SIZE);
 		USART_TransmitInt(count);
 		USART_Transmit(": ");
-		for (int x =0; x < 10; x++)
-		{
-			USART_Transmit(numberPlate[i]);
-		}
-		//USART_Transmit(numberPlate);
+		USART_Transmit(carInfo);
 		USART_Transmit("\r\n");
 		count++;
 	}
 }
 
 void displayMoneyCollected(){
+	int totalCollected = 0;
+	totalCollected = (getChildCount()*PRICE_BELOW_10) + (getAdultCount()*PRICE_ABOVE_10);
+	
+	USART_Transmit("Total amount collected: ");
+	USART_TransmitInt(totalCollected);
+	USART_Transmit("\r\n");
+}
+
+void clearEEPROMMemoryRange(uint16_t start, uint16_t end){
+	uint8_t clearValue = 0xFF;
+	for (uint16_t addr = start; addr < end; addr++) {
+		eeprom_write_byte((uint8_t*)addr, clearValue);
+	}
 }
 
 void resetControllerEEPROM(){
 	uint16_t eepromAddress = 0;
-	uint8_t clearValue = 0xFF;
 
-	for (eepromAddress = 0; eepromAddress < E2END; eepromAddress++) {
-		eeprom_write_byte((uint8_t*)eepromAddress, clearValue);
-	}
+	// we choose to use the getMaxAddress() since it only resets those addresses that 
+	// we wrote to instead of having to do all the memory(using E2END).
+	// This saves us a lot of time.
+	clearEEPROMMemoryRange(0, getMaxAddress());
+	
+	USART_Transmit("Resetting controller successful.");
+	USART_Transmit("\r\n");
 }
 
 void handleMenuChoice(int choice) {
@@ -296,11 +341,8 @@ void handleMenuChoice(int choice) {
 			USART_Transmit(" You entered: ");
 			USART_TransmitInt(adultCount);
 			USART_Transmit("\r\n");
-			// Store values in EEPROM
-			saveNumberPlate(number_plate);
-			eeprom_write_word((uint16_t*)EEPROM_ADDRESS_CHILD_COUNT, childCount);
-			eeprom_write_word((uint16_t*)EEPROM_ADDRESS_ADULT_COUNT, adultCount);
-			eeprom_write_word((uint16_t*)EEPROM_ADDRESS_MAX_COUNT, (adultCount+childCount));
+
+			saveCar(number_plate, childCount, adultCount);			
 
 			USART_Transmit("Tourists registered successfully. Data stored in EEPROM.\r\n");
 		
@@ -312,30 +354,30 @@ void handleMenuChoice(int choice) {
 		
 			break;
 		case '2':
-			childCount = eeprom_read_word((uint16_t*)EEPROM_ADDRESS_CHILD_COUNT);
-			adultCount = eeprom_read_word((uint16_t*)EEPROM_ADDRESS_ADULT_COUNT);
-
 			USART_Transmit("Tourists in the park:\r\n");
-// 			USART_Transmit("Number plate: ");
-// 			USART_Transmit(number_plate);
-// 			USART_Transmit("\r\n");
 
 			USART_Transmit("Below 10yrs: ");
-			USART_TransmitInt(childCount);
+			USART_TransmitInt(getChildCount());
 			USART_Transmit("\r\n");
 
 			USART_Transmit("Above 10yrs: ");
-			USART_TransmitInt(adultCount);
+			USART_TransmitInt(getAdultCount());
+			USART_Transmit("\r\n");
+			
+			USART_Transmit("Total: ");
+			USART_TransmitInt(getTotalCount());
 			USART_Transmit("\r\n");
 			break;
 		case '3':
-			displayCarsInsidePark();
+			displayCarsInsidePark(); // still have some issues, but will be back.
 			break;
 		case '4':
 			displayMoneyCollected();
 			break;
 		case '5':
-			printf("Number of drivers in the park: %d\n", carCount);
+			USART_Transmit("Number of drivers inside the park: ");
+			USART_TransmitInt(countNumberPlates);
+			USART_Transmit("\r\n");
 			break;
 		case '6':
 			printf("Number of bottles in the fridge: %.2f\n", waterBottles);
@@ -344,49 +386,91 @@ void handleMenuChoice(int choice) {
 			//replenishFridge();
 			break;
 		case '8':
-			//IsParkFull();
+			USART_Transmit("Is park full: ");
+			USART_Transmit(isParkFull() ? "yes" : "no");
+			USART_Transmit("\r\n");
 			break;
 		case '9':
-		loggedIn = false;
-		USART_Transmit("Logged out.\r\n");
-		break;
+			carLeavingPark();
+			break;
+		case '10':
+			loggedIn = false;
+			USART_Transmit("Logged out.\r\n");
+			break;
 		default:
-		USART_Transmit("Invalid choice. Please try again.\n");
+			USART_Transmit("Invalid choice. Please try again.\n");
 	}
 }
 
+void carLeavingPark(){
+	char numberPlate[CAR_INFO_SIZE];
+	char carInfo[CAR_INFO_SIZE];
+	char* token;
+	char* carInfoParts[3];
+	int pos = 0;
+	
+	USART_Transmit("Exiting car number plate: ");
+	USART_ReceiveString(numberPlate, sizeof(numberPlate));
+	USART_Transmit("\r\n");
+	
+	for (uint16_t address = (EEPROM_ADDRESS_NUMBER_PLATES - (countNumberPlates*CAR_INFO_SIZE)); address <= getMaxAddress(); address+=CAR_INFO_SIZE)
+	{
+		eeprom_read_block(carInfo, (void*)address, CAR_INFO_SIZE);
+		token = strtok(carInfo, "-");
+		carInfoParts[pos] = token;
+		pos++;
+		while (token != NULL) {
+			token = strtok(NULL, "-");
+			carInfoParts[pos] = token;
+			pos++;
+		}
+		
+		if (!strcmp(removeTrailingNulls(numberPlate), carInfoParts[0])){
+			countNumberPlates--;
+			clearEEPROMMemoryRange(address, address+CAR_INFO_SIZE); // delete that car from memory
+			updateChildrenInParkCount(getChildCount()-atoi(carInfoParts[1]));
+			updateAdultsInParkCount(getAdultCount()-atoi(carInfoParts[2]));
+			//updateTotalPeopleInParkCount()
+			
+			return;
+		} else {
+			USART_Transmit("The entry of car with number plate: ");
+			USART_Transmit(numberPlate);
+			USART_Transmit(" was not recorded.");
+			
+			USART_Transmit("\r\n");
+			return;
+		}
+	}
+}
 
-// void replenishFridge() {
-// 	char inputPassword[10];
-// 	printf("Enter the password: ");
-// 	scanf("%s", inputPassword);
-// 	if (strcmp(inputPassword, password) == 0) {
-// 		int bottlesToAdd;
-// 		printf("Enter the number of bottles to add to the fridge: ");
-// 		scanf("%d", &bottlesToAdd);
-// 		if (bottlesToAdd > 0) {
-// 			waterBottles += bottlesToAdd;
-// 			printf("Replenishing done.\n");
-// 			} else {
-// 			printf("Invalid number of bottles.\n");
-// 		}
-// 		} else {
-// 		printf("Invalid password. Replenishment denied.\n");
-// 	}
-//
-// void displayCarsInsidePark() {
-// 	printf("Cars in the park:\n");
-// 	for (int i = 0; i < 100; i++) {
-// 		if (parkedCar[i].insidePark) {
-// 			printf("Number Plate: %s\n", parkedCar[i].number_plate);
-// 			printf("Occupants: %d\n", parkedCar[i].occupants);
-// 		}
-// 	}
-// }
+void updateChildrenInParkCount(int count){
+	eeprom_write_word((uint16_t*)EEPROM_ADDRESS_CHILD_COUNT, count);
+}
 
-// bool IsParkFull() {
-// 	return (childCount + adultCount + carCount) >= parkCapacity;
-// }
+void updateAdultsInParkCount(int count){
+	eeprom_write_word((uint16_t*)EEPROM_ADDRESS_ADULT_COUNT, count);
+
+}
+
+void updateTotalPeopleInParkCount(int count){
+	eeprom_write_word((uint16_t*)EEPROM_ADDRESS_TOTAL_COUNT, count);
+}
+
+void saveCar(char numberPlate[10], int occupantsBelowTen, int occupantsAboveTen){
+	// At the moment, I am not well conversant(read comfortable) with how addressing and saving arrays 
+	// in EEPROM is happening. As a workaround, I'll be saving cars like this:
+	// numberplate-occupantsBelowTen-occupantsAbove10 e.g. UAU252R-5-12
+	// That way, saving information about a car and its occupants becomes easy without having to deal with 
+	// all the addressing stuff. All I need to is some simple string parsing, and all is well(at least I hope so)
+	char formattedCarInfo[15];
+	sprintf(formattedCarInfo, "%s-%d-%d", numberPlate, occupantsBelowTen, occupantsAboveTen);
+	saveCarInfo(formattedCarInfo);
+	
+	updateChildrenInParkCount(getChildCount()+occupantsBelowTen);
+	updateAdultsInParkCount(getAdultCount()+occupantsAboveTen);
+	updateTotalPeopleInParkCount(getTotalCount()+occupantsAboveTen+occupantsBelowTen);
+}
 
 void defaultMessage() {
 	// msg in case of any exit
@@ -643,7 +727,7 @@ void MoneySlot() {
 }
 
 int main(void)
-{
+{	
 	DDRL = 0x87;
 	DDRH = 0xff; //fridge LCD
 	DDRG = 0xff; // fridge LCD
@@ -654,8 +738,8 @@ int main(void)
 	lcd_init_gate();
 	lcd_init_fridge();
 	
-	USART_Init(); // bring back
-	
+	USART_Init(); 
+	initialiseEEPROM();
 	
 	// setup interrupts
 	sei();
@@ -669,13 +753,12 @@ int main(void)
 	// Set pull up resistor on incoming car switch
 	PORTD |= (1<<PD0);
 	
-	//resetControllerEEPROM();
-	
+	if (resetEEPROM) { resetControllerEEPROM(); initialiseEEPROM(); }
+		
 	while(1){
 		displayMenu();
 	}
 }
-
 
 ISR(INT0_vect) {
  	PORTB |= (1<<PB7);
