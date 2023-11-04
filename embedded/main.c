@@ -36,22 +36,18 @@ uint16_t EEPROM_ADDRESS_ADULT_COUNT = 20;
 uint16_t EEPROM_ADDRESS_MAX_COUNT = 30;
 uint16_t EEPROM_ADDRESS_TOTAL_COUNT = 40;
 uint16_t EEPROM_ADDRESS_NUMBER_PLATES = 50;
+uint16_t WATER_BOTTLES_ADDRESS = 60;
+uint16_t WATER_MONEY_ADDRESS = 60;
 
 void latch();
 char number_plate[10];
 int childCount = 0;
 int adultCount = 0;
 int carCount = 0;
-float parkCapacity = 100;
-float waterBottles = 50; // 50 water bottles in the fridge when full.
+int waterBottles = 50; // 50 water bottles in the fridge when full.
 int bottleNumber;		 // the number of bottles to be dispensed
-// int collectedMoney = waterMoney + feeCollected;
-float childFee = 5000;
-float adultFee = 10000;
-int currentparkCapacity;
 int waterMoney = 0;
 int totalTourists = 0;
-int feeCollected;
 int countNumberPlates = 0;
 bool loggedIn = false;
 bool resetEEPROM = true;
@@ -216,23 +212,27 @@ char getOption()
 
 void replenishFridge()
 {
+	char inputBuffer[20];
 	int bottlesToAdd;
-	printf("Enter the number of bottles to add to the fridge: ");
-	scanf("%d", &bottlesToAdd);
-	if (bottlesToAdd > 0)
-	{
-		waterBottles += bottlesToAdd;
-		printf("Replenishing done.\n");
-	}
-	else
-	{
-		printf("Invalid number of bottles.\n");
-	}
-	// 	else {
-	// 		printf("Invalid password. Replenishment denied.\n");
-	// 	}
-}
+	int desiredBottles = 50;  // Desired number of bottles in the fridge
 
+	USART_Transmit("Number of bottles in the fridge: ");
+	USART_TransmitInt(waterBottles);
+	USART_Transmit("\r\n");
+
+	// number of bottles to add 
+	bottlesToAdd = desiredBottles - waterBottles;
+
+	if (bottlesToAdd > 0) {
+		waterBottles += bottlesToAdd;
+		USART_Transmit("Replenishing done.\r\n");
+		USART_Transmit("Number of bottles in the fridge: ");
+		USART_TransmitInt(waterBottles);
+		USART_Transmit("\r\n");
+		} else {
+		USART_Transmit("Fridge is already stocked with enough bottles.\r\n");
+	}
+}
 void displayMenu()
 {
 	char attendantname[20];
@@ -275,19 +275,18 @@ void displayMenu()
 		USART_Transmit("7. Replenish fridge.\r\n");
 		USART_Transmit("8. Check if park is full.\r\n");
 		USART_Transmit("9. Car exiting park.\r\n");
-		USART_Transmit("10. Logout.\r\n");
+		USART_Transmit("Q. Logout.\r\n");
 		USART_Transmit("Enter an option.\r\n");
 		choice = getOption();
-
+	
 		handleMenuChoice(choice);
-	} while (choice != '10');
+	} while (choice != 'Q');
 
-	USART_Transmit("Logged out.\r\n");
 }
 
 bool isParkFull()
 {
-	totalTourists = eeprom_read_word((uint16_t *)EEPROM_ADDRESS_MAX_COUNT);
+	totalTourists = eeprom_read_word((uint16_t *)EEPROM_ADDRESS_TOTAL_COUNT);
 	if (totalTourists > PARK_MAX_CAP)
 		return true;
 	return false;
@@ -343,11 +342,13 @@ void displayCarsInsidePark()
 
 void displayMoneyCollected()
 {
+	eeprom_write_block((void*)&waterMoney, (void*)WATER_MONEY_ADDRESS, sizeof(waterMoney));
+	waterMoney = MoneySlot();
 	int totalCollected = 0;
-	totalCollected = (getChildCount() * PRICE_BELOW_10) + (getAdultCount() * PRICE_ABOVE_10);
-
+	totalCollected = (getChildCount() * PRICE_BELOW_10) + ((getAdultCount() - 1) * PRICE_ABOVE_10);
+	int collectedMoney = waterMoney + totalCollected;
 	USART_Transmit("Total amount collected: ");
-	USART_TransmitInt(totalCollected);
+	USART_TransmitInt(collectedMoney);
 	USART_Transmit("\r\n");
 }
 
@@ -383,7 +384,7 @@ void handleMenuChoice(int choice)
 			lcd_print_gate("park full");
 			return;
 		}
-
+		lcd_print_gate("Registration.");
 		USART_Transmit("Number plate: ");
 		USART_ReceiveString(number_plate, sizeof(number_plate));
 		USART_Transmit(" You entered: ");
@@ -406,10 +407,10 @@ void handleMenuChoice(int choice)
 
 		USART_Transmit("Tourists registered successfully. Data stored in EEPROM.\r\n");
 
-		lcd_print_gate("Car passing.");
-		_delay_ms(2 * 1000);
+		lcd_print_gate("Car entering.");
+		_delay_ms(2000);
 		lcd_print_gate("Gate closing");
-		_delay_ms(3 * 1000);
+		_delay_ms(3000);
 		lcd_print_gate("Queen Elizabeth N.P.");
 
 		break;
@@ -429,7 +430,7 @@ void handleMenuChoice(int choice)
 		USART_Transmit("\r\n");
 		break;
 	case '3':
-		displayCarsInsidePark(); // still have some issues, but will be back.
+		displayCarsInsidePark(); 
 		break;
 	case '4':
 		displayMoneyCollected();
@@ -440,7 +441,11 @@ void handleMenuChoice(int choice)
 		USART_Transmit("\r\n");
 		break;
 	case '6':
+		eeprom_write_block((void*)&waterBottles, (void*)WATER_BOTTLES_ADDRESS, sizeof(waterBottles));
 		MoneySlot();
+		USART_Transmit("Number of bottles in the fridge: ");
+		USART_TransmitInt(waterBottles);
+		USART_Transmit("\r\n");
 		break;
 	case '7':
 		replenishFridge();
@@ -453,7 +458,7 @@ void handleMenuChoice(int choice)
 	case '9':
 		carLeavingPark();
 		break;
-	case '10':
+	case 'Q':
 		loggedIn = false;
 		USART_Transmit("Logged out.\r\n");
 		break;
@@ -494,7 +499,9 @@ void carLeavingPark()
 			updateChildrenInParkCount(getChildCount() - atoi(carInfoParts[1]));
 			updateAdultsInParkCount(getAdultCount() - atoi(carInfoParts[2]));
 			updateTotalPeopleInParkCount(atoi(carInfoParts[1]) + atoi(carInfoParts[2]));
-
+			lcd_print_gate("Car exiting the park.");
+			_delay_ms(2000);
+			lcd_print_gate();
 			return;
 		}
 		else
@@ -526,11 +533,6 @@ void updateTotalPeopleInParkCount(int count)
 
 void saveCar(char numberPlate[10], int occupantsBelowTen, int occupantsAboveTen)
 {
-	// At the moment, I am not well conversant(read comfortable) with how addressing and saving arrays
-	// in EEPROM is happening. As a workaround, I'll be saving cars like this:
-	// numberplate-occupantsBelowTen-occupantsAbove10 e.g. UAU252R-5-12
-	// That way, saving information about a car and its occupants becomes easy without having to deal with
-	// all the addressing stuff. All I need to is some simple string parsing, and all is well(at least I hope so)
 	char formattedCarInfo[15];
 	sprintf(formattedCarInfo, "%s-%d-%d", numberPlate, occupantsBelowTen, occupantsAboveTen);
 	saveCarInfo(formattedCarInfo);
@@ -540,10 +542,6 @@ void saveCar(char numberPlate[10], int occupantsBelowTen, int occupantsAboveTen)
 	updateTotalPeopleInParkCount(getTotalCount() + occupantsAboveTen + occupantsBelowTen);
 }
 
-void defaultMessage()
-{
-	// msg in case of any exit
-}
 
 void latch_lcd_fridge()
 {
@@ -609,7 +607,6 @@ void lcd_init_gate()
 
 void lcd_print_fridge(char *content)
 {
-	lcd_command_fridge(0x01);
 	int len = strlen(content);
 	for (int i = 0; i < len; i++)
 	{
@@ -617,12 +614,12 @@ void lcd_print_fridge(char *content)
 	}
 }
 
-void lcd_print_fridge_no_clear(char *content)
+void lcd_print_gate_clear(char *content)
 {
 	int len = strlen(content);
 	for (int i = 0; i < len; i++)
 	{
-		lcd_data_fridge(content[i]);
+		lcd_data_gate(content[i]);
 	}
 }
 
@@ -636,88 +633,42 @@ void lcd_print_gate(char *content)
 	}
 }
 
-int register_keypad()
-{
-	int key = -1;
-	PORTD = 0b11111011; // first column
-	_delay_ms(10);
-	if ((PIND & 0x8) == 0)
-	{
-		key = 1;
-	}
-	else if ((PINL & 0x10) == 0)
-	{
-		key = 4;
-	}
-	else if ((PINL & 0x20) == 0)
-	{
-		key = 7;
-	}
-
-	PORTD = 0b11111101; // second column
-	if ((PIND & 0x8) == 0)
-	{
-		key = 2;
-	}
-	else if ((PIND & 0x10) == 0)
-	{
-		key = 5;
-	}
-	else if ((PIND & 0x20) == 0)
-	{
-		key = 8;
-	}
-	else if ((PIND & 0x40) == 0)
-	{
-		key = 0;
-	}
-
-	PORTD = 0b11111110;
-	if ((PIND & 0x8) == 0)
-	{
-		key = 3;
-	}
-	else if ((PIND & 0x10) == 0)
-	{
-		key = 6;
-	}
-	else if ((PIND & 0x20) == 0)
-	{
-		key = 9;
-	}
-	return key;
-}
-
 void MoneySlot()
 {
-	lcd_print_fridge("Bottle costs UGX1500");
-	_delay_ms(1000);
-
+	lcd_command_fridge(0x01); 
+	lcd_command_fridge(0x80);
+	lcd_print_fridge("Bottle costs");
+	lcd_command_fridge(0xC9);
+	lcd_print_fridge("UGX1500");
+	lcd_command_fridge(0x90);
 	lcd_print_fridge("Bottles: ");
 	int bottleNumber = 0;
 	while (bottleNumber == 0)
 	{
 		bottleNumber = bottle_keypad();
 	}
+	lcd_command_fridge(0x99);
 	lcd_data_fridge((char)(bottleNumber + '0'));
 	_delay_ms(500);
 
 	int cash = bottleNumber * 1500;
 	char bottleCash[8];
 	sprintf(bottleCash, "%d", cash);
-
-	// _delay_ms(50);
+	
+	lcd_command_fridge(0x01);
+	lcd_command_fridge(0x80);
+	_delay_ms(50);
 	lcd_print_fridge("Total Cost:");
-	// lcd_command_fridge(0xC5, 1); // padding for the LCD
-	lcd_print_fridge_no_clear(bottleCash);
-	// lcd_command(0xCA, 1);
-	// lcd_print("UGX.", 1);
-	// _delay_ms(50);
+	lcd_command_fridge(0xC5);
+	lcd_print_fridge(bottleCash);
+	lcd_command_fridge(0xCA);
+	lcd_print_fridge("UGX.");
+	_delay_ms(50);
 
-	// lcd_command(0x90, 1);
+	lcd_command_fridge(0x90);
 	lcd_print_fridge("Press 9:Accept");
 	lcd_command_fridge(0xD0);
-	lcd_print_fridge_no_clear("Press 0: Quit");
+	lcd_print_fridge("Press 0: Quit");
 
 	int choice = 0;
 	while (choice == 0)
@@ -726,8 +677,8 @@ void MoneySlot()
 
 		if (choice == 9)
 		{
-			// lcd_command_fridge(0x01, 1);
-			// lcd_command_fridge(0x80, 1);
+			lcd_command_fridge(0x01);
+			lcd_command_fridge(0x80);
 			lcd_print_fridge("Accepted.");
 			for (int i = 0; i < 3; i++) // motor - open money slot
 			{
@@ -750,14 +701,14 @@ void MoneySlot()
 
 			waterMoney += cash;
 			waterBottles -= bottleNumber;
-			return;
+			return waterMoney;
 		}
 		else if (choice == 0)
 		{
-			// lcd_command_fridge(0x01, 1);
-			// lcd_command_fridge(0x80, 1);
+			lcd_command_fridge(0x01);
+			lcd_command_fridge(0x80);
 			lcd_print_fridge("Bye Bye. Thanks.");
-			_delay_ms(20);
+			_delay_ms(2000);
 			return;
 		}
 		else
@@ -765,8 +716,9 @@ void MoneySlot()
 			choice = 0; // Reset choice if an invalid key is pressed
 		}
 
-		// MoneySlot();
+		 
 	}
+	MoneySlot();
 }
 
 int bottle_keypad()
@@ -830,14 +782,19 @@ int main(void)
 
 	lcd_init_gate();
 	lcd_init_fridge();
-
+	lcd_print_gate_clear("WELCOME TO");
+	lcd_command_gate(0xC0);
+	lcd_print_gate_clear("QUEEN ELIZABETH");
+	lcd_command_gate(0x90);
+	lcd_print_gate_clear("NATIONAL PARK.");
+	_delay_ms(2000);
 	USART_Init();
 	initialiseEEPROM();
 
 	// setup interrupts
 	sei();
 	EIMSK |= (1 << INT0);
-	MCUCR |= (1 << ISC01);
+	EICRA |= (1 << ISC01);
 
 	// set data direction registers
 	DDRD = 0x00;
@@ -855,17 +812,16 @@ int main(void)
 	while (1)
 	{
 		displayMenu();
-		MoneySlot();
 	}
 }
 
 ISR(INT0_vect)
 {
-	PORTB |= (1 << PB7);
-	_delay_ms(500);
-	PORTB &= ~(1 << PB7);
-	lcd_print_gate("Car at gate.");
+	if (PIND & ~(1 << PD0)) {
+		PORTB |= (1 << PB7);
+		_delay_ms(500);
+		PORTB &= ~(1 << PB7);
+		lcd_print_gate("Car at Gate.");
+	}
+		
 }
-
-// TODO;
-//  store the bottle prices in EEPROM
